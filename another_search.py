@@ -42,7 +42,6 @@ class Graph:
         self.graph[v1].append(v2)
 
     def find_node(self, start: Node, target: Node) -> Optional[List[Node]]:
-
         visited: Set[Node] = set()
         explore_stack: List[Tuple[Node, List[Node]]] = [(start, [start])]
 
