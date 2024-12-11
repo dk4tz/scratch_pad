@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional, Set, Tuple, TypeAlias
 
+from collections import deque
+
 
 class TreeNode:
     def __init__(self, value):
@@ -41,24 +43,71 @@ class Graph:
             self.graph[v2] = []
         self.graph[v1].append(v2)
 
-    def find_node(self, start: Node, target: Node) -> Optional[List[Node]]:
-        visited: Set[Node] = set()
-        explore_stack: List[Tuple[Node, List[Node]]] = [(start, [start])]
+    def find_node_bfs(self, start: Node, target: Node) -> Optional[List[Node]]:
+        if start not in self.graph or target not in self.graph:
+            return None
+        if start == target:
+            return [start]
 
-        while explore_stack:
-            current, path = explore_stack.pop()
+        visited = {start}
+        search_queue = deque([(start, [start])])
 
-            if current == target:
-                return path
-            if current not in visited:
-                visited.add(current)
+        while search_queue:
+            node, path = search_queue.popleft()
 
-            for child in reversed(self.graph[current]):
+            for child in reversed(self.graph[node]):
+                if child == target:
+                    return path + [child]
+
                 if child not in visited:
-                    path_to_child = path + [child]
-                    explore_stack.append((child, path_to_child))
+                    visited.add(child)
+                    child_path = path + [child]
+                    search_queue.append((child, child_path))
 
-        return []
+        return None
+
+    def find_node_dfs(self, start: Node, target: Node) -> Optional[List[Node]]:
+        """
+        is start the target?
+        is start or target None?
+
+        track visited
+        perform recursive dfs on start
+
+        recursive dfs (node, target, path)
+        have we visited the node?
+        nope, is node the target?
+            yes return path + [node] ## base case
+        nope, iterate through neighbors
+        recursive dfs on neighbor
+
+        is neighbor target? --> return
+        nope, run find_node_dfs -->
+
+        """
+
+        if start == target:
+            return [start]
+        if not start or not target:
+            return None
+        if start not in self.graph or target not in self.graph:
+            return None
+
+        visited = {start}
+        path = [start]
+
+        def recursive_dfs(node, target, path):
+            visited.add(node)
+            for child in self.graph[node]:
+                if child == target:
+                    return path + [child]
+                if child not in visited:
+                    result = recursive_dfs(child, target, path + [child])
+                    if result:
+                        return result
+            return None
+
+        return recursive_dfs(start, target, path)
 
 
 def test_search() -> None:
@@ -69,9 +118,9 @@ def test_search() -> None:
     for v1, v2 in edges:
         g.add_vertex(v1, v2)
 
-    print("None") if not g.find_node("A", "C") else print(g.find_node("A", "C"))
-    print("None") if not g.find_node("A", "D") else print(g.find_node("A", "D"))
-    print("None") if not g.find_node("B", "F") else print(g.find_node("B", "F"))
+    print("None") if not g.find_node_bfs("A", "C") else print(g.find_node_bfs("A", "C"))
+    print("None") if not g.find_node_bfs("A", "D") else print(g.find_node_bfs("A", "D"))
+    print("None") if not g.find_node_bfs("B", "F") else print(g.find_node_bfs("B", "F"))
 
 
 def main() -> None:
