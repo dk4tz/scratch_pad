@@ -6,22 +6,6 @@ from typing import List
 
 
 def calculate_most_water(heights: List[int]) -> int:
-    """
-    initialize pointers (left = 0, right = len(heights) - 1)
-    initialize max volume
-
-    while left < right:
-    width = right - left
-    height = min(heights at index right, left)
-    vol = width * height
-
-    if vol > max_vol:
-    update max_vol
-
-    if left <= right --> increment left
-    otherwise decrement right
-    return max vol
-    """
 
     left, right = 0, len(heights) - 1
     max_vol = 0
