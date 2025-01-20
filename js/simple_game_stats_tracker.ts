@@ -35,16 +35,10 @@ interface Play {
 
 class GameStatsTracker {
 	// data stores
-	#playerStats: Map<PlayerId, PlayerStats>;
-	#rollingPlays: Play[];
+	#playerStats = new Map<PlayerId, PlayerStats>();
+	#rollingPlays: Play[] = [];
 
 	static readonly MAX_PLAYS: number = 20;
-
-	// constructor
-	constructor() {
-		this.#playerStats = new Map();
-		this.#rollingPlays = [];
-	}
 
 	// methods
 	recordPlay(play: Play) {
