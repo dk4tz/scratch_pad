@@ -16,12 +16,18 @@ class BallparkStream implements AsyncIterable<BaseballEvent> {
 
 	static async connect(url: string): Promise<BallparkStream> {
 		const stream = new BallparkStream();
-		stream.#ws = new WebSocket(url);
 
-		await new Promise((res, rej) => {
-			stream.#ws.onopen = res;
-			stream.#ws.onerror = rej;
-		});
+		try {
+			await new Promise((res, rej) => {
+				let ws = new WebSocket(url);
+				stream.#ws = ws;
+				stream.#ws.onopen = res;
+				stream.#ws.onerror = rej;
+			});
+		} catch (err) {
+			stream.#ws?.close();
+			throw err;
+		}
 
 		return stream;
 	}
@@ -73,10 +79,10 @@ class StatProcessor {
 	}
 
 	async #processQueue(key: string): Promise<void> {
-		let queue = this.#queues.get(key);
-		if (!queue) return;
 		try {
-			while (queue.length > 0) {
+			while (this.#queues.get(key)?.length > 0) {
+				const queue = this.#queues.get(key);
+				if (!queue) break;
 				const next_event = queue.shift();
 				// additional process logic
 				await Promise.allSettled(
