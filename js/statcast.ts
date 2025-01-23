@@ -1,98 +1,125 @@
-// "Our Statcast system processes real-time data from multiple
-// ballparks simultaneously, each generating around 10,000 events
-// per second. Design a scalable system to ingest, process, and
-// distribute this data to multiple consuming applications with
-// minimal latency."
-
-type BaseballEvent = {
-	ballparkId: string;
+type GameEvent = {
+	id: number;
 	gameId: string;
-	data: any;
+	type: 'HIT' | 'OUT' | 'WALK';
+	playerId: string;
+	timestamp: number;
 };
 
-class BallparkStream implements AsyncIterable<BaseballEvent> {
+class GameStream {
 	#ws: WebSocket;
+
 	private constructor() {}
 
-	static async connect(url: string): Promise<BallparkStream> {
-		const stream = new BallparkStream();
-
+	static async connect(ws_url: string): Promise<GameStream> {
+		const stream = new GameStream();
 		try {
-			await new Promise((res, rej) => {
-				let ws = new WebSocket(url);
+			await new Promise<void>((res, rej) => {
+				let ws = new WebSocket(ws_url);
+				ws.onopen = () => res();
+				ws.onerror = (err) => rej(err);
 				stream.#ws = ws;
-				stream.#ws.onopen = res;
-				stream.#ws.onerror = rej;
 			});
+			return stream;
 		} catch (err) {
 			stream.#ws?.close();
-			throw err;
+			throw new Error(err);
 		}
-
-		return stream;
 	}
 
-	async *[Symbol.asyncIterator](): AsyncIterator<BaseballEvent> {
+	async close(): Promise<void> {
+		if (this.#ws.readyState === WebSocket.CLOSED) {
+			return;
+		}
+		try {
+			this.#ws.close();
+			await new Promise<void>(
+				(res, _) => (this.#ws.onclose = () => res())
+			);
+		} catch (err) {
+			throw new Error(err);
+		}
+	}
+
+	async *[Symbol.asyncIterator]() {
 		while (this.#ws.readyState === WebSocket.OPEN) {
-			yield await new Promise<BaseballEvent>((res, rej) => {
-				this.#ws.onmessage = (msg) => res(JSON.parse(msg.data));
-				this.#ws.onerror = rej;
-			});
+			try {
+				yield await new Promise<GameEvent>((res, rej) => {
+					this.#ws.onmessage = (msg) => res(JSON.parse(msg.data));
+					this.#ws.onerror = (err) => rej(err);
+				});
+			} catch (err) {
+				throw new Error(err);
+			}
 		}
-	}
-
-	close(): void {
-		this.#ws.close();
 	}
 }
 
-class StatProcessor {
-	#queues = new Map<string, BaseballEvent[]>();
-	#subscribers = new Set<(event: BaseballEvent) => Promise<void>>();
-	#maxQueueSize = 1000; // Configurable limit
+// process events from multiple games simultaneously
+// send notifications to subscribers
+// keep a memory tally of player stats
 
-	subscribe(subscriber: (event: BaseballEvent) => Promise<void>) {
-		this.#subscribers.add(subscriber);
-		return () => this.#subscribers.delete(subscriber);
-	}
+type PStats = {
+	hits: number;
+	walks: number;
+	outs: number;
+};
+class GameProcessor {
+	#queues = new Map<string, GameEvent[]>();
+	#stats = new Map<string, PStats>();
+	#inProgress = new Set<string>();
+	#subscribers = new Set<(gameEvent: GameEvent) => Promise<void>>();
 
-	async ingest(stream: BallparkStream) {
-		try {
-			for await (const event of stream) {
-				const key = `${event.ballparkId}:${event.gameId}`;
-				let queue = this.#queues.get(key) ?? [];
-
-				while (queue.length >= this.#maxQueueSize) {
-					await new Promise((resolve) => setTimeout(resolve, 100));
-				}
-				if (!this.#queues.has(key)) {
-					this.#queues.set(key, [event]);
-					this.#processQueue(key);
-				} else {
-					this.#queues.get(key).push(event);
-				}
+	async ingest(stream: GameStream): Promise<void> {
+		for await (const event of stream) {
+			const key = event.gameId;
+			if (!this.#queues.has(key)) {
+				this.#queues.set(key, []);
 			}
-		} catch (error) {
-			console.error(error);
-			throw error;
+			this.#queues.get(key)!.push(event);
+			if (!this.#inProgress.has(key)) {
+				this.#inProgress.add(key);
+				this.#process(key).catch((err) => {
+					console.error(`Processing error for game ${key}:`, err);
+					this.#inProgress.delete(key);
+				});
+			}
 		}
 	}
 
-	async #processQueue(key: string): Promise<void> {
+	async #process(key: string) {
 		try {
-			while (this.#queues.get(key)?.length > 0) {
-				const queue = this.#queues.get(key);
-				if (!queue) break;
-				const next_event = queue.shift();
-				// additional process logic
-				await Promise.allSettled(
-					[...this.#subscribers].map((sub) => {
-						return sub(next_event);
-					})
+			while (this.#queues.get(key).length > 0) {
+				let game_event = this.#queues.get(key).shift();
+				let stats = this.#stats.get(game_event.playerId) ?? {
+					hits: 0,
+					walks: 0,
+					outs: 0
+				};
+				const stat_key = (game_event.type.toLowerCase() +
+					's') as keyof PStats;
+				stats[stat_key]++;
+				this.#stats.set(game_event.playerId, stats);
+
+				const results = await Promise.allSettled(
+					[...this.#subscribers].map((subsc) => subsc(game_event))
 				);
+				results.forEach((result, idx) => {
+					if (result.status === 'rejected') {
+						console.error(
+							`Issue with subscriber #${idx}: ${result.reason}`
+						);
+					}
+				});
 			}
-		} finally {
 			this.#queues.delete(key);
+		} finally {
+			this.#inProgress.delete(key);
 		}
+	}
+
+	subscribe(handler: (game_event: GameEvent) => Promise<void>): () => void {
+		this.#subscribers.add(handler);
+		return () => this.#subscribers.delete(handler);
 	}
 }
